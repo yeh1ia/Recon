@@ -9,6 +9,22 @@ PURPLE="\033[0;35m"
 CYAN="\033[0;36m"
 RESET="\033[0m"
 
+# Clear screen
+clear
+
+echo -e "${GREEN}"
+echo "  ______                  ____        _           _   _             "
+echo " |  ____|                |  _ \\      | |         | | (_)            "
+echo " | |__ _ __ ___  ___     | |_) | __ _| | ___  ___| |_ _ _ __   ___  "
+echo " |  __| '__/ _ \\/ _ \\    |  _ < / _\` | |/ _ \\/ __| __| | '_ \\ / _ \\ "
+echo " | |  | | |  __/  __/    | |_) | (_| | |  __/\\__ \\ |_| | | | |  __/ "
+echo " |_|  |_|  \\___|\\___|    |____/ \\__,_|_|\\___||___/\\__|_|_| |_|\\___| "
+echo -e "${NC}"
+                                                                 
+echo -e "                              ${WHITE}by 9x_7ydra${NC}"
+echo ""
+
+
 # Function to fetch data for a subdomain using VirusTotal
 fetch_vt_data() {
   local subdomain=$1
