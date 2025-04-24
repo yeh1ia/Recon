@@ -109,11 +109,17 @@ init_environment() {
     touch "$NAMESERVERS_FILE"
 }
 
-# Function to clean up temporary files
+# Make sure ALL_SUBDOMAINS is preserved before cleanup
 cleanup() {
     if [ "$VERBOSE" = true ]; then
         print_info "Cleaning up temporary files..."
     fi
+    
+    # Make sure we've exported the subdomain lists before cleanup
+    if [[ ! -f "$TARGET_DOMAIN-all-subdomains.txt" ]]; then
+        export_subdomains_only
+    fi
+    
     rm -rf "$TEMP_DIR"
 }
 
@@ -441,7 +447,6 @@ run_dnsrecon() {
     return 0
 }
 
-# Function to run findomain
 run_findomain() {
     if ! check_command "findomain"; then
         print_error "findomain not found. Please install it: https://github.com/Findomain/Findomain"
@@ -450,13 +455,33 @@ run_findomain() {
     
     print_info "Running findomain for subdomain discovery"
     
-    findomain -t "$TARGET_DOMAIN" -q -o "$SOURCES_DIR/findomain.txt"
+    # Ensure the directory exists
+    mkdir -p "$SOURCES_DIR"
     
-    count=$(wc -l < "$SOURCES_DIR/findomain.txt")
-    print_success "Findomain discovered $count subdomains"
+    # Get the correct syntax help
+    findomain_help=$(findomain --help 2>&1)
     
-    # Add results to all subdomains
-    cat "$SOURCES_DIR/findomain.txt" >> "$ALL_SUBDOMAINS"
+    # Check if we need to use -o or --output-file for the output file
+    if echo "$findomain_help" | grep -q -- "--output-file"; then
+        # Use output-file flag
+        findomain --target "$TARGET_DOMAIN" --quiet --output-file "$SOURCES_DIR/findomain.txt"
+    else
+        # Try with an alternative approach - direct output redirection
+        findomain --target "$TARGET_DOMAIN" --quiet > "$SOURCES_DIR/findomain.txt"
+    fi
+    
+    # Check if the file exists and has content
+    if [[ -f "$SOURCES_DIR/findomain.txt" ]] && [[ -s "$SOURCES_DIR/findomain.txt" ]]; then
+        count=$(wc -l < "$SOURCES_DIR/findomain.txt")
+        print_success "Findomain discovered $count subdomains"
+        
+        # Add results to all subdomains
+        cat "$SOURCES_DIR/findomain.txt" >> "$ALL_SUBDOMAINS"
+    else
+        print_warning "Findomain didn't produce any output file or it's empty"
+        # Create an empty file to avoid errors in subsequent steps
+        touch "$SOURCES_DIR/findomain.txt"
+    fi
     
     return 0
 }
@@ -635,10 +660,10 @@ search_github() {
     
     print_info "Searching GitHub for exposed subdomains"
     
-    # Search for domain in code
+    # Search for domain in code - remove the invalid language:any parameter
     query=$(echo -n "$TARGET_DOMAIN" | jq -sRr @uri)
     response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" \
-        "https://api.github.com/search/code?q=\"$query\"%20language:any&per_page=100")
+        "https://api.github.com/search/code?q=\"$query\"&per_page=100")
     
     # Check if the API returned an error
     if echo "$response" | grep -q "message"; then
@@ -835,29 +860,21 @@ verify_subdomains() {
     total=$(wc -l < "$ALL_SUBDOMAINS")
     print_info "Total of $total unique subdomains to verify"
     
-    # Set up parallel processing if available
-    if check_command "parallel"; then
-        print_info "Using GNU Parallel for subdomain verification"
-        export -f verify_subdomain print_detail
-        export TEMP_DIR VERIFIED_SUBDOMAINS RESULTS_FILE TAKEOVERS_FILE VERBOSE CUSTOM_DNS
-        cat "$ALL_SUBDOMAINS" | parallel -j "$MAX_THREADS" --bar verify_subdomain
-    else
-        print_info "GNU Parallel not found, falling back to serial processing"
-        count=0
-        while read -r subdomain; do
-            count=$((count + 1))
-            if [[ "$VERBOSE" = true ]]; then
-                print_detail "Verifying $count/$total: $subdomain"
-            else
-                # Print progress every 50 subdomains
-                if (( count % 50 == 0 )); then
-                    print_info "Progress: $count/$total"
-                fi
+    # Skip GNU Parallel check and always use serial processing
+    count=0
+    while read -r subdomain; do
+        count=$((count + 1))
+        if [[ "$VERBOSE" = true ]]; then
+            print_detail "Verifying $count/$total: $subdomain"
+        else
+            # Print progress every 50 subdomains
+            if (( count % 50 == 0 )); then
+                print_info "Progress: $count/$total"
             fi
-            
-            verify_subdomain "$subdomain"
-        done < "$ALL_SUBDOMAINS"
-    fi
+        fi
+        
+        verify_subdomain "$subdomain"
+    done < "$ALL_SUBDOMAINS"
     
     # Count verified subdomains
     verified_count=$(wc -l < "$VERIFIED_SUBDOMAINS")
@@ -953,18 +970,28 @@ perform_dns_cache_snooping() {
 }
 # Add this function right before the format_results function
 
+
 # Function to export only subdomains to a file
 export_subdomains_only() {
-    print_info "Exporting list of subdomains only"
+    print_info "Exporting lists of subdomains"
     
-    # Create the subdomain-only file
-    subdomain_file="$TARGET_DOMAIN-subdomains.txt"
+    # Create the verified subdomain-only file
+    verified_subdomain_file="$TARGET_DOMAIN-verified-subdomains.txt"
     
     # Extract only unique subdomain names from verified subdomains
-    sort -u "$VERIFIED_SUBDOMAINS" > "$subdomain_file"
+    sort -u "$VERIFIED_SUBDOMAINS" > "$verified_subdomain_file"
     
-    count=$(wc -l < "$subdomain_file")
-    print_success "Exported $count unique subdomains to $subdomain_file"
+    verified_count=$(wc -l < "$verified_subdomain_file")
+    print_success "Exported $verified_count verified unique subdomains to $verified_subdomain_file"
+    
+    # Create the all subdomains file - this includes both verified and unverified
+    all_subdomain_file="$TARGET_DOMAIN-all-subdomains.txt"
+    
+    # Copy all discovered subdomains to permanent file
+    sort -u "$ALL_SUBDOMAINS" > "$all_subdomain_file"
+    
+    all_count=$(wc -l < "$all_subdomain_file")
+    print_success "Exported $all_count total unique subdomains to $all_subdomain_file"
     
     return 0
 }
@@ -1138,6 +1165,7 @@ format_results() {
     
     print_success "Results saved to $OUTPUT_FILE"
     print_success "Results saved to $subdomain_file"
+    print_success "Results saved to $ALL_SUBDOMAINS"
     print_success "Subdomain-only list saved to $TARGET_DOMAIN-subdomains.txt"
     
     return 0
@@ -1167,7 +1195,6 @@ main() {
         
         run_subfinder
         run_assetfinder
-        run_amass
         run_findomain
         run_sublist3r
         run_gobuster_dns
