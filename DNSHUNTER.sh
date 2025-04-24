@@ -952,6 +952,197 @@ perform_dns_cache_snooping() {
     
     return 0
 }
+# Add this function right before the format_results function
+
+# Function to export only subdomains to a file
+export_subdomains_only() {
+    print_info "Exporting list of subdomains only"
+    
+    # Create the subdomain-only file
+    subdomain_file="$TARGET_DOMAIN-subdomains.txt"
+    
+    # Extract only unique subdomain names from verified subdomains
+    sort -u "$VERIFIED_SUBDOMAINS" > "$subdomain_file"
+    
+    count=$(wc -l < "$subdomain_file")
+    print_success "Exported $count unique subdomains to $subdomain_file"
+    
+    return 0
+}
+
+# Modify the format_results function by adding a call to export_subdomains_only at the beginning
+format_results() {
+    print_info "Formatting and saving results"
+    
+    # Always export subdomains-only regardless of format
+    export_subdomains_only
+    
+    # Rest of the format_results function remains unchanged
+    # Copy verified subdomains to output format
+    case "$OUTPUT_FORMAT" in
+        json)
+            # Create JSON structure
+            echo "{" > "$TEMP_DIR/output.json"
+            echo "  \"target\": \"$TARGET_DOMAIN\"," >> "$TEMP_DIR/output.json"
+            echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"," >> "$TEMP_DIR/output.json"
+            echo "  \"total_discovered\": $(wc -l < "$ALL_SUBDOMAINS")," >> "$TEMP_DIR/output.json"
+            echo "  \"total_verified\": $(wc -l < "$VERIFIED_SUBDOMAINS")," >> "$TEMP_DIR/output.json"
+            
+            # Convert takeovers to JSON array
+            echo "  \"potential_takeovers\": [" >> "$TEMP_DIR/output.json"
+            if [[ -f "$TAKEOVERS_FILE" ]] && [[ -s "$TAKEOVERS_FILE" ]]; then
+                first=true
+                while read -r takeover; do
+                    if [[ "$first" = true ]]; then
+                        first=false
+                    else
+                        echo "," >> "$TEMP_DIR/output.json"
+                    fi
+                    # Escape for JSON
+                    takeover=$(echo "$takeover" | sed 's/"/\\"/g')
+                    echo -n "    \"$takeover\"" >> "$TEMP_DIR/output.json"
+                done < "$TAKEOVERS_FILE"
+                echo "" >> "$TEMP_DIR/output.json"
+            fi
+            echo "  ]," >> "$TEMP_DIR/output.json"
+            
+            # Add nameservers
+            echo "  \"nameservers\": [" >> "$TEMP_DIR/output.json"
+            first=true
+            while read -r ns; do
+                if [[ "$first" = true ]]; then
+                    first=false
+                else
+                    echo "," >> "$TEMP_DIR/output.json"
+                fi
+                # Remove trailing dot and escape for JSON
+                ns=${ns%*.}
+                echo -n "    \"$ns\"" >> "$TEMP_DIR/output.json"
+            done < "$NAMESERVERS_FILE"
+            echo "" >> "$TEMP_DIR/output.json"
+            echo "  ]," >> "$TEMP_DIR/output.json"
+            
+            # Add subdomains with records
+            echo "  \"subdomains\": [" >> "$TEMP_DIR/output.json"
+            first=true
+            while read -r line; do
+                subdomain=$(echo "$line" | cut -d':' -f1)
+                record_type=$(echo "$line" | cut -d':' -f2)
+                record_value=$(echo "$line" | cut -d':' -f3-)
+                
+                if [[ "$first" = true ]]; then
+                    first=false
+                else
+                    echo "," >> "$TEMP_DIR/output.json"
+                fi
+                
+                echo "    {" >> "$TEMP_DIR/output.json"
+                echo "      \"subdomain\": \"$subdomain\"," >> "$TEMP_DIR/output.json"
+                echo "      \"record_type\": \"$record_type\"," >> "$TEMP_DIR/output.json"
+                # Escape for JSON
+                record_value=$(echo "$record_value" | sed 's/"/\\"/g')
+                echo "      \"value\": \"$record_value\"" >> "$TEMP_DIR/output.json"
+                echo -n "    }" >> "$TEMP_DIR/output.json"
+            done < "$RESULTS_FILE"
+            echo "" >> "$TEMP_DIR/output.json"
+            echo "  ]" >> "$TEMP_DIR/output.json"
+            echo "}" >> "$TEMP_DIR/output.json"
+            
+            # Set output file
+            if [[ -z "$OUTPUT_FILE" ]]; then
+                OUTPUT_FILE="$TARGET_DOMAIN-$(date +%Y%m%d%H%M%S).json"
+            elif [[ ! "$OUTPUT_FILE" =~ \.json$ ]]; then
+                OUTPUT_FILE="$OUTPUT_FILE.json"
+            fi
+            
+            # Copy to output file
+            cp "$TEMP_DIR/output.json" "$OUTPUT_FILE"
+            ;;
+            
+        csv)
+            # Create CSV header
+            echo "subdomain,record_type,value" > "$TEMP_DIR/output.csv"
+            
+            # Add subdomains with records
+            while read -r line; do
+                subdomain=$(echo "$line" | cut -d':' -f1)
+                record_type=$(echo "$line" | cut -d':' -f2)
+                record_value=$(echo "$line" | cut -d':' -f3-)
+                
+                # Escape commas in CSV
+                record_value=$(echo "$record_value" | sed 's/,/\\,/g')
+                
+                echo "$subdomain,$record_type,\"$record_value\"" >> "$TEMP_DIR/output.csv"
+            done < "$RESULTS_FILE"
+            
+            # Set output file
+            if [[ -z "$OUTPUT_FILE" ]]; then
+                OUTPUT_FILE="$TARGET_DOMAIN-$(date +%Y%m%d%H%M%S).csv"
+            elif [[ ! "$OUTPUT_FILE" =~ \.csv$ ]]; then
+                OUTPUT_FILE="$OUTPUT_FILE.csv"
+            fi
+            
+            # Copy to output file
+            cp "$TEMP_DIR/output.csv" "$OUTPUT_FILE"
+            ;;
+            
+        *)
+            # Default to TXT format
+            echo "DNSHunter Results for $TARGET_DOMAIN" > "$TEMP_DIR/output.txt"
+            echo "Generated on $(date)" >> "$TEMP_DIR/output.txt"
+            echo "------------------------" >> "$TEMP_DIR/output.txt"
+            echo "" >> "$TEMP_DIR/output.txt"
+            
+            echo "Summary:" >> "$TEMP_DIR/output.txt"
+            echo "- Total subdomains discovered: $(wc -l < "$ALL_SUBDOMAINS")" >> "$TEMP_DIR/output.txt"
+            echo "- Total verified live subdomains: $(wc -l < "$VERIFIED_SUBDOMAINS")" >> "$TEMP_DIR/output.txt"
+            
+            if [[ -f "$TAKEOVERS_FILE" ]] && [[ -s "$TAKEOVERS_FILE" ]]; then
+                takeover_count=$(wc -l < "$TAKEOVERS_FILE")
+                echo "- Potential subdomain takeovers: $takeover_count" >> "$TEMP_DIR/output.txt"
+            else
+                echo "- No potential subdomain takeovers found" >> "$TEMP_DIR/output.txt"
+            fi
+            
+            echo "" >> "$TEMP_DIR/output.txt"
+            echo "Nameservers:" >> "$TEMP_DIR/output.txt"
+            cat "$NAMESERVERS_FILE" >> "$TEMP_DIR/output.txt"
+            
+            echo "" >> "$TEMP_DIR/output.txt"
+            echo "Verified Subdomains:" >> "$TEMP_DIR/output.txt"
+            
+            while read -r line; do
+                subdomain=$(echo "$line" | cut -d':' -f1)
+                record_type=$(echo "$line" | cut -d':' -f2)
+                record_value=$(echo "$line" | cut -d':' -f3-)
+                
+                echo "- $subdomain ($record_type): $record_value" >> "$TEMP_DIR/output.txt"
+            done < "$RESULTS_FILE"
+            
+            if [[ -f "$TAKEOVERS_FILE" ]] && [[ -s "$TAKEOVERS_FILE" ]]; then
+                echo "" >> "$TEMP_DIR/output.txt"
+                echo "Potential Subdomain Takeovers:" >> "$TEMP_DIR/output.txt"
+                cat "$TAKEOVERS_FILE" >> "$TEMP_DIR/output.txt"
+            fi
+            
+            # Set output file
+            if [[ -z "$OUTPUT_FILE" ]]; then
+                OUTPUT_FILE="$TARGET_DOMAIN-$(date +%Y%m%d%H%M%S).txt"
+            elif [[ ! "$OUTPUT_FILE" =~ \.(txt|text)$ ]]; then
+                OUTPUT_FILE="$OUTPUT_FILE.txt"
+            fi
+            
+            # Copy to output file
+            cp "$TEMP_DIR/output.txt" "$OUTPUT_FILE"
+            ;;
+    esac
+    
+    print_success "Results saved to $OUTPUT_FILE"
+    print_success "Subdomain-only list saved to $TARGET_DOMAIN-subdomains.txt"
+    
+    return 0
+}
+
 
 # Function to format and save results
 format_results() {
@@ -1117,6 +1308,8 @@ format_results() {
     esac
     
     print_success "Results saved to $OUTPUT_FILE"
+    print_success "Results saved to $OUTPUT_FILE"
+    print_success "Subdomain-only list saved to $TARGET_DOMAIN-subdomains.txt"
     
     return 0
 }
