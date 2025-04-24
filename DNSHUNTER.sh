@@ -5,7 +5,6 @@
 # Features:
 # - Integration with multiple subdomain discovery tools:
 #   * Subfinder
-#   * Amass
 #   * Assetfinder
 #   * Findomain
 #   * Sublist3r
