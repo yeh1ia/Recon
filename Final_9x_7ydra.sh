@@ -21,7 +21,7 @@ echo " | |  | | |  __/  __/   | |_) | (_| | |  __/\\__ \\ |_| | | | |  __/ "
 echo " |_|  |_|  \\___|\\___|   |____/ \\__,_|_|\\___||___/\\__|_|_| |_|\\___| "
 echo -e "${NC}"
                                                                         
-echo -e "                                     ${WHITE}by 9x_7ydra (enhanced by Gemini)${NC}"
+echo -e "                                     ${WHITE}by 9x_7ydra ${NC}"
 echo ""
 
 
