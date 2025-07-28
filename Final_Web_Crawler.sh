@@ -1,18 +1,4 @@
 #!/bin/bash
-
-# ====================================================================================================
-# Freedom: Enhanced URL Crawling & Parameter Discovery Engine
-# Version: 2.0 - Extensive Verbosity and Feature Expansion
-#
-# This script orchestrates various command-line tools to perform advanced reconnaissance
-# for web application security assessments. It automates URL collection, JavaScript analysis,
-# parameter discovery, secret extraction, and comprehensive reporting.
-#
-# The goal of this version is to provide an extremely detailed and commented codebase,
-# illustrating the inner workings of each stage and providing a foundation for further
-# expansion and customization by advanced users ("gurus").
-# ====================================================================================================
-
 # ----------------------------------------------------------------------------------------------------
 # Section 1: Configuration and Global Variables
 # Defines colors, formatting, and all script-wide variables.
